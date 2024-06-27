@@ -9,7 +9,7 @@ import (
 	"strings"
 )
 
-var db = make(map[string]string)
+var db = make(map[string]dbEntry)
 
 func main() {
 	fmt.Println("Start main!")
