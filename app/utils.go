@@ -2,6 +2,8 @@ package main
 
 import (
 	"bufio"
+	"fmt"
+	"net"
 	"strconv"
 	"strings"
 )
@@ -34,4 +36,21 @@ func readBulkStr(reader *bufio.Reader) (string, error) {
 		return "", err
 	}
 	return dataStr, nil
+}
+
+func writeSimpleStr(c net.Conn, value string) error {
+	simple := fmt.Sprintf("+%s\r\n", value)
+	_, err := c.Write([]byte(simple))
+	return err
+}
+
+func writeBulkStr(c net.Conn, value string) error {
+	bulk := fmt.Sprintf("$%d\r\n%s\r\n", len(value), value)
+	_, err := c.Write([]byte(bulk))
+	return err
+}
+
+func writeNullBulkStr(c net.Conn) error {
+	_, err := c.Write([]byte("$-1\r\n"))
+	return err
 }

@@ -9,6 +9,8 @@ import (
 	"strings"
 )
 
+var db = make(map[string]string)
+
 func main() {
 	fmt.Println("Start main!")
 
@@ -86,27 +88,17 @@ func handleConnection(c net.Conn) {
 	}
 }
 
+var commandFuncs = map[string]func(net.Conn, []string) error{
+	"ping": ping,
+	"echo": echo,
+	"set":  set,
+	"get":  get,
+}
+
 func handleCommand(c net.Conn, command []string) error {
-	switch strings.ToLower(command[0]) {
-	case "ping":
-		if len(command) > 1 {
-			return fmt.Errorf("PING does not expect extra arguments, got: %v", command)
-		}
-		_, err := c.Write([]byte("+PONG\r\n"))
-		if err != nil {
-			return err
-		}
-	case "echo":
-		if len(command) != 2 {
-			return fmt.Errorf("ECHO expects one extra arguments, got: %v", command)
-		}
-		toEcho := command[1]
-		_, err := c.Write([]byte(fmt.Sprintf("$%d\r\n%s\r\n", len(toEcho), toEcho)))
-		if err != nil {
-			return err
-		}
-	default:
+	f, ok := commandFuncs[strings.ToLower(command[0])]
+	if !ok {
 		return fmt.Errorf("got unexpected command: %v", command[0])
 	}
-	return nil
+	return f(c, command)
 }
