@@ -15,32 +15,28 @@ func main() {
 		os.Exit(1)
 	}
 
-	conn, err := l.Accept()
-	if err != nil {
-		fmt.Println("Error accepting connection: ", err.Error())
-		os.Exit(1)
-	}
-
-	for i := 0; i < 3; {
-		d := make([]byte, 128)
-		_, err = conn.Read(d)
+	for {
+		conn, err := l.Accept()
 		if err != nil {
-			fmt.Println("Error writing response: ", err.Error())
+			fmt.Println("Error accepting connection: ", err.Error())
+			os.Exit(1)
 		}
 
-		_, err = conn.Write([]byte("+PONG\r\n"))
-		if err != nil {
-			fmt.Println("Error writing response: ", err.Error())
-		}
-		i++
-	}
-	conn.Close()
+		go func(c net.Conn) {
+			for i := 0; i < 3; {
+				d := make([]byte, 128)
+				_, err = c.Read(d)
+				if err != nil {
+					fmt.Println("Error writing response: ", err.Error())
+				}
 
-	// go func(c net.Conn) {
-	// 	_, err := c.Write([]byte("+PONG\r\n"))
-	// 	if err != nil {
-	// 		fmt.Println("Error writing response: ", err.Error())
-	// 	}
-	// 	c.Close()
-	// }(conn)
+				_, err = c.Write([]byte("+PONG\r\n"))
+				if err != nil {
+					fmt.Println("Error writing response: ", err.Error())
+				}
+				i++
+			}
+			c.Close()
+		}(conn)
+	}
 }
