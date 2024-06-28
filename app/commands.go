@@ -13,7 +13,7 @@ type dbEntry struct {
 	ExpiresAt time.Time
 }
 
-func ping(c net.Conn, command []string) error {
+func (st *state) ping(c net.Conn, command []string) error {
 	if len(command) > 1 {
 		return fmt.Errorf("PING does not expect extra arguments, got: %v", command)
 	}
@@ -21,7 +21,7 @@ func ping(c net.Conn, command []string) error {
 	return writeSimpleStr(c, "PONG")
 }
 
-func echo(c net.Conn, command []string) error {
+func (st *state) echo(c net.Conn, command []string) error {
 	if len(command) != 2 {
 		return fmt.Errorf("ECHO expects 1 extra arguments, got: %v", command)
 	}
@@ -29,7 +29,7 @@ func echo(c net.Conn, command []string) error {
 	return writeBulkStr(c, command[1])
 }
 
-func set(c net.Conn, command []string) error {
+func (st *state) set(c net.Conn, command []string) error {
 	if len(command) != 3 && len(command) != 5 {
 		return fmt.Errorf("SET expects 2 or 4 extra arguments, got: %v", command)
 	}
@@ -46,17 +46,17 @@ func set(c net.Conn, command []string) error {
 		entry.ExpiresAt = time.Now().Add(time.Duration(px) * time.Millisecond)
 	}
 
-	db[command[1]] = entry
+	st.db[command[1]] = entry
 
 	return writeSimpleStr(c, "OK")
 }
 
-func get(c net.Conn, command []string) error {
+func (st *state) get(c net.Conn, command []string) error {
 	if len(command) != 2 {
 		return fmt.Errorf("GET expects 1 extra arguments, got: %v", command)
 	}
 
-	entry, ok := db[command[1]]
+	entry, ok := st.db[command[1]]
 
 	if !ok || (!entry.ExpiresAt.IsZero() && entry.ExpiresAt.Before(time.Now())) {
 		return writeNullBulkStr(c)
@@ -65,14 +65,20 @@ func get(c net.Conn, command []string) error {
 	return writeBulkStr(c, entry.Value)
 }
 
-func info(c net.Conn, command []string) error {
+func (st *state) info(c net.Conn, command []string) error {
 	if len(command) > 2 {
 		return fmt.Errorf("INFO expects at most 1 extra arguments, got: %v", command)
 	}
 
+	role := "master"
+	if st.masterHost != "" {
+		role = "slave"
+	}
+
 	data := strings.Join([]string{
 		"# Replication",
-		"role:master",
+		fmt.Sprintf("role:%s", role),
 	}, "\r\n")
+
 	return writeBulkStr(c, data)
 }

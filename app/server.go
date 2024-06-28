@@ -8,20 +8,42 @@ import (
 	"io"
 	"log"
 	"net"
+	"regexp"
 	"strconv"
 	"strings"
 )
 
-var db = make(map[string]dbEntry)
+type state struct {
+	port       int
+	masterHost string
+	db         map[string]dbEntry
+}
+
+var st state
 
 func main() {
 	fmt.Println("Start main!")
 	port := flag.Int("port", 6379, "Port to bind to. Defaults to 6379")
+	replicaof := flag.String("replicaof", "", "Address and port of master")
 	flag.Parse()
 
-	l, err := net.Listen("tcp", fmt.Sprintf("0.0.0.0:%d", *port))
+	master := ""
+	if *replicaof != "" {
+		match, _ := regexp.MatchString(`^\w+ \d+$`, *replicaof)
+		if !match {
+			log.Fatalf("invalid replicaof %s", *replicaof)
+		}
+		master = *replicaof
+	}
+	st = state{
+		port:       *port,
+		masterHost: master,
+		db:         make(map[string]dbEntry),
+	}
+
+	l, err := net.Listen("tcp", fmt.Sprintf("0.0.0.0:%d", st.port))
 	if err != nil {
-		log.Fatalf("Failed to bind to port %d", *port)
+		log.Fatalf("Failed to bind to port %d", st.port)
 	}
 	defer l.Close()
 
@@ -95,11 +117,11 @@ func handleConnection(c net.Conn) {
 }
 
 var commandFuncs = map[string]func(net.Conn, []string) error{
-	"ping": ping,
-	"echo": echo,
-	"set":  set,
-	"get":  get,
-	"info": info,
+	"ping": st.ping,
+	"echo": st.echo,
+	"set":  st.set,
+	"get":  st.get,
+	"info": st.info,
 }
 
 func handleCommand(c net.Conn, command []string) error {
