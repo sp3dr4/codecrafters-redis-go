@@ -2,8 +2,10 @@ package main
 
 import (
 	"bufio"
+	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"strconv"
@@ -41,7 +43,9 @@ func handleConnection(c net.Conn) {
 	for {
 		respType, err := reader.ReadByte()
 		if err != nil {
-			fmt.Println("error reading request first byte:", err.Error())
+			if !errors.Is(err, io.EOF) {
+				fmt.Println("error reading request first byte:", err.Error())
+			}
 			return
 		}
 		if respType != '*' {
@@ -95,6 +99,7 @@ var commandFuncs = map[string]func(net.Conn, []string) error{
 	"echo": echo,
 	"set":  set,
 	"get":  get,
+	"info": info,
 }
 
 func handleCommand(c net.Conn, command []string) error {

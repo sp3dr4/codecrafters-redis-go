@@ -64,3 +64,15 @@ func get(c net.Conn, command []string) error {
 
 	return writeBulkStr(c, entry.Value)
 }
+
+func info(c net.Conn, command []string) error {
+	if len(command) > 2 {
+		return fmt.Errorf("INFO expects at most 1 extra arguments, got: %v", command)
+	}
+
+	data := strings.Join([]string{
+		"# Replication",
+		"role:master",
+	}, "\r\n")
+	return writeBulkStr(c, data)
+}
