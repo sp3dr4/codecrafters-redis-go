@@ -32,7 +32,45 @@ func (s *state) ReplicaStartHandshake() error {
 		return err
 	}
 	_, err = fmt.Fprint(conn, FmtArray([]string{"PING"}))
-	return err
+	if err != nil {
+		return err
+	}
+	resp, err := bufio.NewReader(conn).ReadString('\n')
+	if err != nil {
+		return err
+	}
+	fmt.Printf("Handshake: PING response -> %v\n", resp)
+	if !strings.HasPrefix(resp, "+PONG") {
+		return fmt.Errorf("expected PONG to handshake PING, got %v", resp)
+	}
+
+	_, err = fmt.Fprint(conn, FmtArray([]string{"REPLCONF", "listening-port", fmt.Sprintf("%d", s.port)}))
+	if err != nil {
+		return err
+	}
+	resp, err = bufio.NewReader(conn).ReadString('\n')
+	if err != nil {
+		return err
+	}
+	fmt.Printf("Handshake: REPLCONF #1 response -> %v\n", resp)
+	if !strings.HasPrefix(resp, "+OK") {
+		return fmt.Errorf("expected OK to handshake REPLCONF, got %v", resp)
+	}
+
+	_, err = fmt.Fprint(conn, FmtArray([]string{"REPLCONF", "capa", "psync2"}))
+	if err != nil {
+		return err
+	}
+	resp, err = bufio.NewReader(conn).ReadString('\n')
+	if err != nil {
+		return err
+	}
+	fmt.Printf("Handshake: REPLCONF #2 response -> %v\n", resp)
+	if !strings.HasPrefix(resp, "+OK") {
+		return fmt.Errorf("expected OK to handshake REPLCONF, got %v", resp)
+	}
+
+	return nil
 }
 
 var st state
@@ -141,11 +179,12 @@ func handleConnection(c net.Conn) {
 }
 
 var commandFuncs = map[string]func(net.Conn, []string) error{
-	"ping": st.ping,
-	"echo": st.echo,
-	"set":  st.set,
-	"get":  st.get,
-	"info": st.info,
+	"ping":     st.ping,
+	"echo":     st.echo,
+	"set":      st.set,
+	"get":      st.get,
+	"info":     st.info,
+	"replconf": st.replconf,
 }
 
 func handleCommand(c net.Conn, command []string) error {

@@ -88,3 +88,7 @@ func (st *state) info(c net.Conn, command []string) error {
 
 	return write(c, FmtBulkStr(data))
 }
+
+func (st *state) replconf(c net.Conn, command []string) error {
+	return write(c, FmtSimpleStr("OK"))
+}
