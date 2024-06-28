@@ -21,6 +21,20 @@ type state struct {
 	db                map[string]dbEntry
 }
 
+func (s *state) IsMaster() bool {
+	return s.masterHost == ""
+}
+
+func (s *state) ReplicaStartHandshake() error {
+	parts := strings.Fields(s.masterHost)
+	conn, err := net.Dial("tcp", net.JoinHostPort(parts[0], parts[1]))
+	if err != nil {
+		return err
+	}
+	_, err = fmt.Fprint(conn, FmtArray([]string{"PING"}))
+	return err
+}
+
 var st state
 
 func main() {
@@ -50,6 +64,12 @@ func main() {
 		log.Fatalf("Failed to bind to port %d", st.port)
 	}
 	defer l.Close()
+
+	if !st.IsMaster() {
+		if err := st.ReplicaStartHandshake(); err != nil {
+			log.Fatalf("failed handshake: %v", err)
+		}
+	}
 
 	for {
 		conn, err := l.Accept()

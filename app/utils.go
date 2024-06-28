@@ -38,19 +38,27 @@ func readBulkStr(reader *bufio.Reader) (string, error) {
 	return dataStr, nil
 }
 
-func writeSimpleStr(c net.Conn, value string) error {
-	simple := fmt.Sprintf("+%s\r\n", value)
-	_, err := c.Write([]byte(simple))
+func write(c net.Conn, value string) error {
+	_, err := c.Write([]byte(value))
 	return err
 }
 
-func writeBulkStr(c net.Conn, value string) error {
-	bulk := fmt.Sprintf("$%d\r\n%s\r\n", len(value), value)
-	_, err := c.Write([]byte(bulk))
-	return err
+func FmtSimpleStr(value string) string {
+	return fmt.Sprintf("+%s\r\n", value)
 }
 
-func writeNullBulkStr(c net.Conn) error {
-	_, err := c.Write([]byte("$-1\r\n"))
-	return err
+func FmtBulkStr(value string) string {
+	return fmt.Sprintf("$%d\r\n%s\r\n", len(value), value)
+}
+
+func FmtNullBulkStr() string {
+	return "$-1\r\n"
+}
+
+func FmtArray(items []string) string {
+	array := fmt.Sprintf("*%d\r\n", len(items))
+	for _, o := range items {
+		array += fmt.Sprintf("$%d\r\n%s\r\n", len(o), o)
+	}
+	return array
 }

@@ -18,7 +18,7 @@ func (st *state) ping(c net.Conn, command []string) error {
 		return fmt.Errorf("PING does not expect extra arguments, got: %v", command)
 	}
 
-	return writeSimpleStr(c, "PONG")
+	return write(c, FmtSimpleStr("PONG"))
 }
 
 func (st *state) echo(c net.Conn, command []string) error {
@@ -26,7 +26,7 @@ func (st *state) echo(c net.Conn, command []string) error {
 		return fmt.Errorf("ECHO expects 1 extra arguments, got: %v", command)
 	}
 
-	return writeBulkStr(c, command[1])
+	return write(c, FmtBulkStr(command[1]))
 }
 
 func (st *state) set(c net.Conn, command []string) error {
@@ -48,7 +48,7 @@ func (st *state) set(c net.Conn, command []string) error {
 
 	st.db[command[1]] = entry
 
-	return writeSimpleStr(c, "OK")
+	return write(c, FmtSimpleStr("OK"))
 }
 
 func (st *state) get(c net.Conn, command []string) error {
@@ -59,10 +59,10 @@ func (st *state) get(c net.Conn, command []string) error {
 	entry, ok := st.db[command[1]]
 
 	if !ok || (!entry.ExpiresAt.IsZero() && entry.ExpiresAt.Before(time.Now())) {
-		return writeNullBulkStr(c)
+		return write(c, FmtNullBulkStr())
 	}
 
-	return writeBulkStr(c, entry.Value)
+	return write(c, FmtBulkStr(entry.Value))
 }
 
 func (st *state) info(c net.Conn, command []string) error {
@@ -74,7 +74,7 @@ func (st *state) info(c net.Conn, command []string) error {
 		"# Replication",
 	}
 
-	if st.masterHost == "" {
+	if st.IsMaster() {
 		infos = append(infos, []string{
 			"role:master",
 			fmt.Sprintf("master_replid:%s", st.replicationId),
@@ -86,5 +86,5 @@ func (st *state) info(c net.Conn, command []string) error {
 
 	data := strings.Join(infos, "\r\n")
 
-	return writeBulkStr(c, data)
+	return write(c, FmtBulkStr(data))
 }
