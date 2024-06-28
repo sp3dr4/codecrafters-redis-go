@@ -2,9 +2,10 @@ package main
 
 import (
 	"bufio"
+	"flag"
 	"fmt"
+	"log"
 	"net"
-	"os"
 	"strconv"
 	"strings"
 )
@@ -13,11 +14,12 @@ var db = make(map[string]dbEntry)
 
 func main() {
 	fmt.Println("Start main!")
+	port := flag.Int("port", 6379, "Port to bind to. Defaults to 6379")
+	flag.Parse()
 
-	l, err := net.Listen("tcp", "0.0.0.0:6379")
+	l, err := net.Listen("tcp", fmt.Sprintf("0.0.0.0:%d", *port))
 	if err != nil {
-		fmt.Println("Failed to bind to port 6379")
-		os.Exit(1)
+		log.Fatalf("Failed to bind to port %d", *port)
 	}
 	defer l.Close()
 
