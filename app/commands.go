@@ -92,3 +92,7 @@ func (st *state) info(c net.Conn, command []string) error {
 func (st *state) replconf(c net.Conn, command []string) error {
 	return write(c, FmtSimpleStr("OK"))
 }
+
+func (st *state) psync(c net.Conn, command []string) error {
+	return write(c, FmtSimpleStr(fmt.Sprintf("FULLRESYNC %s 0", st.replicationId)))
+}

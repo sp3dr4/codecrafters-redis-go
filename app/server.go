@@ -70,6 +70,16 @@ func (s *state) ReplicaStartHandshake() error {
 		return fmt.Errorf("expected OK to handshake REPLCONF, got %v", resp)
 	}
 
+	_, err = fmt.Fprint(conn, FmtArray([]string{"PSYNC", "?", "-1"}))
+	if err != nil {
+		return err
+	}
+	resp, err = bufio.NewReader(conn).ReadString('\n')
+	if err != nil {
+		return err
+	}
+	fmt.Printf("Handshake: PSYNC response -> %v\n", resp)
+
 	return nil
 }
 
@@ -185,6 +195,7 @@ var commandFuncs = map[string]func(net.Conn, []string) error{
 	"get":      st.get,
 	"info":     st.info,
 	"replconf": st.replconf,
+	"psync":    st.psync,
 }
 
 func handleCommand(c net.Conn, command []string) error {
