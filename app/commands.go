@@ -70,15 +70,21 @@ func (st *state) info(c net.Conn, command []string) error {
 		return fmt.Errorf("INFO expects at most 1 extra arguments, got: %v", command)
 	}
 
-	role := "master"
-	if st.masterHost != "" {
-		role = "slave"
+	infos := []string{
+		"# Replication",
 	}
 
-	data := strings.Join([]string{
-		"# Replication",
-		fmt.Sprintf("role:%s", role),
-	}, "\r\n")
+	if st.masterHost == "" {
+		infos = append(infos, []string{
+			"role:master",
+			fmt.Sprintf("master_replid:%s", st.replicationId),
+			fmt.Sprintf("master_repl_offset:%d", st.replicationOffset),
+		}...)
+	} else {
+		infos = append(infos, "role:slave")
+	}
+
+	data := strings.Join(infos, "\r\n")
 
 	return writeBulkStr(c, data)
 }

@@ -14,9 +14,11 @@ import (
 )
 
 type state struct {
-	port       int
-	masterHost string
-	db         map[string]dbEntry
+	port              int
+	replicationId     string
+	replicationOffset int
+	masterHost        string
+	db                map[string]dbEntry
 }
 
 var st state
@@ -36,9 +38,11 @@ func main() {
 		master = *replicaof
 	}
 	st = state{
-		port:       *port,
-		masterHost: master,
-		db:         make(map[string]dbEntry),
+		port:              *port,
+		replicationId:     "8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb",
+		replicationOffset: 0,
+		masterHost:        master,
+		db:                make(map[string]dbEntry),
 	}
 
 	l, err := net.Listen("tcp", fmt.Sprintf("0.0.0.0:%d", st.port))
