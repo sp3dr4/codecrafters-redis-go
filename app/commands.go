@@ -49,6 +49,7 @@ func (st *state) set(c net.Conn, command []string) error {
 
 	st.db[command[1]] = entry
 
+	defer st.ReplicateCommand(command)
 	return write(c, FmtSimpleStr("OK"))
 }
 
@@ -109,5 +110,11 @@ func (st *state) psync(c net.Conn, command []string) error {
 		return err
 	}
 	_, err = c.Write(emptyRDB)
-	return err
+	if err != nil {
+		return err
+	}
+
+	st.replicasConnections = append(st.replicasConnections, &c)
+
+	return nil
 }

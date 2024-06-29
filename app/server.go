@@ -14,15 +14,29 @@ import (
 )
 
 type state struct {
-	port              int
-	replicationId     string
-	replicationOffset int
-	masterHost        string
-	db                map[string]dbEntry
+	port                int
+	replicationId       string
+	replicationOffset   int
+	replicasConnections []*net.Conn
+	masterHost          string
+	db                  map[string]dbEntry
 }
 
 func (s *state) IsMaster() bool {
 	return s.masterHost == ""
+}
+
+func (s *state) ReplicateCommand(command []string) {
+	if !s.IsMaster() {
+		return
+	}
+
+	for _, rc := range s.replicasConnections {
+		_, err := fmt.Fprint(*rc, FmtArray(command))
+		if err != nil {
+			fmt.Printf("error replicating command to %v: %v\n", (*rc).RemoteAddr(), err)
+		}
+	}
 }
 
 func (s *state) ReplicaStartHandshake() error {
@@ -100,11 +114,12 @@ func main() {
 		master = *replicaof
 	}
 	st = state{
-		port:              *port,
-		replicationId:     "8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb",
-		replicationOffset: 0,
-		masterHost:        master,
-		db:                make(map[string]dbEntry),
+		port:                *port,
+		replicationId:       "8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb",
+		replicationOffset:   0,
+		replicasConnections: make([]*net.Conn, 0),
+		masterHost:          master,
+		db:                  make(map[string]dbEntry),
 	}
 
 	l, err := net.Listen("tcp", fmt.Sprintf("0.0.0.0:%d", st.port))
