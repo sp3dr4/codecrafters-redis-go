@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/hex"
 	"fmt"
 	"net"
 	"strconv"
@@ -94,5 +95,19 @@ func (st *state) replconf(c net.Conn, command []string) error {
 }
 
 func (st *state) psync(c net.Conn, command []string) error {
-	return write(c, FmtSimpleStr(fmt.Sprintf("FULLRESYNC %s 0", st.replicationId)))
+	err := write(c, FmtSimpleStr(fmt.Sprintf("FULLRESYNC %s 0", st.replicationId)))
+	if err != nil {
+		return err
+	}
+	emptyRDBHex := "524544495330303131fa0972656469732d76657205372e322e30fa0a72656469732d62697473c040fa056374696d65c26d08bc65fa08757365642d6d656dc2b0c41000fa08616f662d62617365c000fff06e3bfec0ff5aa2"
+	emptyRDB, err := hex.DecodeString(emptyRDBHex)
+	if err != nil {
+		return err
+	}
+	_, err = c.Write([]byte(fmt.Sprintf("$%d\r\n", len(emptyRDB))))
+	if err != nil {
+		return err
+	}
+	_, err = c.Write(emptyRDB)
+	return err
 }
