@@ -22,6 +22,18 @@ type state struct {
 	db                  map[string]dbEntry
 }
 
+var st state
+
+var commandFuncs = map[string]func(net.Conn, []string) error{
+	"ping":     st.ping,
+	"echo":     st.echo,
+	"set":      st.set,
+	"get":      st.get,
+	"info":     st.info,
+	"replconf": st.replconf,
+	"psync":    st.psync,
+}
+
 func (s *state) IsMaster() bool {
 	return s.masterHost == ""
 }
@@ -41,6 +53,8 @@ func (s *state) ReplicaStartHandshake() error {
 	if err != nil {
 		return err
 	}
+
+	fmt.Printf("handshake-conn: %v\n", conn.RemoteAddr().String())
 
 	reader := bufio.NewReader(conn)
 
@@ -104,62 +118,22 @@ func (s *state) ReplicaStartHandshake() error {
 	if err != nil {
 		return err
 	}
-	fmt.Printf("Handshake: received RDB\n%q\n", v)
+	fmt.Printf("Handshake: received RDB\n%q\n\n", v)
 
-	go handleConnection(conn)
+	go s.handleConnection(conn)
 	return nil
 }
 
-var st state
-
-func main() {
-	fmt.Println("Start main!")
-	port := flag.Int("port", 6379, "Port to bind to. Defaults to 6379")
-	replicaof := flag.String("replicaof", "", "Address and port of master")
-	flag.Parse()
-
-	master := ""
-	if *replicaof != "" {
-		match, _ := regexp.MatchString(`^\w+ \d+$`, *replicaof)
-		if !match {
-			log.Fatalf("invalid replicaof %s", *replicaof)
-		}
-		master = *replicaof
+func (s *state) handleCommand(c net.Conn, command []string) error {
+	fmt.Printf("master: %t, command: %v\n", s.IsMaster(), command)
+	f, ok := commandFuncs[strings.ToLower(command[0])]
+	if !ok {
+		return fmt.Errorf("got unexpected command: %v", command[0])
 	}
-	st = state{
-		port:                *port,
-		replicationId:       "8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb",
-		replicationOffset:   0,
-		replicasConnections: make([]*net.Conn, 0),
-		masterHost:          master,
-		db:                  make(map[string]dbEntry),
-	}
-
-	l, err := net.Listen("tcp", fmt.Sprintf("0.0.0.0:%d", st.port))
-	if err != nil {
-		log.Fatalf("Failed to bind to port %d", st.port)
-	}
-	defer l.Close()
-
-	if !st.IsMaster() {
-		err := st.ReplicaStartHandshake()
-		if err != nil {
-			log.Fatal(err)
-		}
-	}
-
-	for {
-		conn, err := l.Accept()
-		if err != nil {
-			fmt.Println("Error accepting connection: ", err.Error())
-			continue
-		}
-
-		go handleConnection(conn)
-	}
+	return f(c, command)
 }
 
-func handleConnection(c net.Conn) {
+func (s *state) handleConnection(c net.Conn) {
 	defer c.Close()
 	reader := bufio.NewReader(c)
 
@@ -215,27 +189,58 @@ func handleConnection(c net.Conn) {
 				return
 			}
 		}
-		fmt.Println("command:", command)
-		if err := handleCommand(c, command); err != nil {
+
+		if err := st.handleCommand(c, command); err != nil {
 			fmt.Println("command error:", err.Error())
 		}
 	}
 }
 
-var commandFuncs = map[string]func(net.Conn, []string) error{
-	"ping":     st.ping,
-	"echo":     st.echo,
-	"set":      st.set,
-	"get":      st.get,
-	"info":     st.info,
-	"replconf": st.replconf,
-	"psync":    st.psync,
-}
+func main() {
+	fmt.Println("Start main!")
+	port := flag.Int("port", 6379, "Port to bind to. Defaults to 6379")
+	replicaof := flag.String("replicaof", "", "Address and port of master")
+	flag.Parse()
 
-func handleCommand(c net.Conn, command []string) error {
-	f, ok := commandFuncs[strings.ToLower(command[0])]
-	if !ok {
-		return fmt.Errorf("got unexpected command: %v", command[0])
+	master := ""
+	if *replicaof != "" {
+		match, _ := regexp.MatchString(`^\w+ \d+$`, *replicaof)
+		if !match {
+			log.Fatalf("invalid replicaof %s", *replicaof)
+		}
+		master = *replicaof
 	}
-	return f(c, command)
+	st = state{
+		port:                *port,
+		replicationId:       "8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb",
+		replicationOffset:   0,
+		replicasConnections: make([]*net.Conn, 0),
+		masterHost:          master,
+		db:                  make(map[string]dbEntry),
+	}
+
+	l, err := net.Listen("tcp", fmt.Sprintf("0.0.0.0:%d", st.port))
+	if err != nil {
+		log.Fatalf("Failed to bind to port %d", st.port)
+	}
+	defer l.Close()
+
+	if !st.IsMaster() {
+		err := st.ReplicaStartHandshake()
+		if err != nil {
+			log.Fatal(err)
+		}
+	}
+
+	for {
+		conn, err := l.Accept()
+		if err != nil {
+			fmt.Println("Error accepting connection: ", err.Error())
+			continue
+		}
+
+		fmt.Printf("loop-conn: %v\n", conn.RemoteAddr().String())
+
+		go st.handleConnection(conn)
+	}
 }

@@ -95,7 +95,14 @@ func (st *state) info(c net.Conn, command []string) error {
 }
 
 func (st *state) replconf(c net.Conn, command []string) error {
-	return write(c, FmtSimpleStr("OK"))
+	if st.IsMaster() {
+		return write(c, FmtSimpleStr("OK"))
+	}
+
+	if strings.ToLower(command[1]) != "getack" {
+		return fmt.Errorf("replica REPLCONF expects GETACK, got: %v", command)
+	}
+	return write(c, FmtArray([]string{"REPLCONF", "ACK", "0"}))
 }
 
 func (st *state) psync(c net.Conn, command []string) error {
