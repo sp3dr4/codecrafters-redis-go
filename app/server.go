@@ -13,6 +13,11 @@ import (
 	"strings"
 )
 
+type RedisConn struct {
+	FromMaster bool
+	conn       *net.Conn
+}
+
 type masterConf struct {
 	replicationId       string
 	replicationOffset   int
@@ -21,7 +26,6 @@ type masterConf struct {
 
 type replicaConf struct {
 	masterHost      string
-	masterConn      *net.Conn
 	processedOffset int
 }
 
@@ -34,7 +38,7 @@ type state struct {
 
 var st state
 
-var commandFuncs = map[string]func(*net.Conn, []string) error{
+var commandFuncs = map[string]func(RedisConn, []string) error{
 	"ping":     st.ping,
 	"echo":     st.echo,
 	"set":      st.set,
@@ -48,10 +52,6 @@ func (s *state) IsMaster() bool {
 	return s.replica.masterHost == ""
 }
 
-func (s *state) FromMaster(c *net.Conn) bool {
-	return s.replica.masterConn == c
-}
-
 func (s *state) ReplicateCommand(command []string) {
 	for _, rc := range s.master.replicasConnections {
 		_, err := fmt.Fprint(*rc, FmtArray(command))
@@ -61,18 +61,11 @@ func (s *state) ReplicateCommand(command []string) {
 	}
 }
 
-func (s *state) ReplicaStartHandshake() error {
-	parts := strings.Fields(s.replica.masterHost)
-	conn, err := net.Dial("tcp", net.JoinHostPort(parts[0], parts[1]))
-	if err != nil {
-		return err
-	}
-
-	s.replica.masterConn = &conn
-
+func (s *state) ReplicaStartHandshake(rc RedisConn) error {
+	conn := *rc.conn
 	reader := bufio.NewReader(conn)
 
-	_, err = fmt.Fprint(conn, FmtArray([]string{"PING"}))
+	_, err := fmt.Fprint(conn, FmtArray([]string{"PING"}))
 	if err != nil {
 		return err
 	}
@@ -80,56 +73,70 @@ func (s *state) ReplicaStartHandshake() error {
 	if err != nil {
 		return err
 	}
-	fmt.Printf("Handshake: PING response -> %v\n", resp)
+	// fmt.Printf("Handshake: PING response -> %v\n", resp)
 	if !strings.HasPrefix(resp, "+PONG") {
 		return fmt.Errorf("expected PONG to handshake PING, got %v", resp)
 	}
 
+	// fmt.Println("Handshake: sending REPLCONF #1")
 	_, err = fmt.Fprint(conn, FmtArray([]string{"REPLCONF", "listening-port", fmt.Sprintf("%d", s.port)}))
 	if err != nil {
+		fmt.Println("error sending REPLCONF #1", err)
 		return err
 	}
 	resp, err = reader.ReadString('\n')
 	if err != nil {
+		fmt.Println("error reading REPLCONF #1 response", err)
 		return err
 	}
-	fmt.Printf("Handshake: REPLCONF #1 response -> %v\n", resp)
+	// fmt.Printf("Handshake: REPLCONF #1 response -> %v\n", resp)
 	if !strings.HasPrefix(resp, "+OK") {
 		return fmt.Errorf("expected OK to handshake REPLCONF, got %v", resp)
 	}
 
+	// fmt.Println("Handshake: sending REPLCONF #2")
 	_, err = fmt.Fprint(conn, FmtArray([]string{"REPLCONF", "capa", "psync2"}))
 	if err != nil {
+		fmt.Println("error sending REPLCONF #2", err)
 		return err
 	}
 	resp, err = reader.ReadString('\n')
 	if err != nil {
+		fmt.Println("error reading REPLCONF #2 response", err)
 		return err
 	}
-	fmt.Printf("Handshake: REPLCONF #2 response -> %v\n", resp)
+	// fmt.Printf("Handshake: REPLCONF #2 response -> %v\n", resp)
 	if !strings.HasPrefix(resp, "+OK") {
 		return fmt.Errorf("expected OK to handshake REPLCONF, got %v", resp)
 	}
 
+	// fmt.Println("Handshake: sending PSYNC")
 	_, err = fmt.Fprint(conn, FmtArray([]string{"PSYNC", "?", "-1"}))
 	if err != nil {
+		fmt.Println("error sending PSYNC", err)
 		return err
 	}
 	resp, err = reader.ReadString('\n')
 	if err != nil {
+		fmt.Println("error reading PSYNC response", err)
 		return err
 	}
-	fmt.Printf("Handshake: PSYNC response -> %v\n", resp)
+	// fmt.Printf("Handshake: PSYNC response -> %v\n", resp)
 
+	fmt.Println("Handshake: reading RDB start byte")
 	respType, err := reader.ReadByte()
 	if err != nil {
+		fmt.Println("error reading RDB start byte", err)
 		return err
 	}
+	// fmt.Printf("Handshake: RDB start byte -> %v\n", string(respType))
 	if respType != '$' {
 		return fmt.Errorf("expected $ as RDB file start, got %v", respType)
 	}
+	// fmt.Println("Handshake: reading RDB file content")
 	v, err := readBulkStr(reader)
 	if err != nil {
+		fmt.Println("error reading RDB file content", err)
 		return err
 	}
 	fmt.Printf("Handshake: received RDB\n%q\n\n", v)
@@ -137,7 +144,7 @@ func (s *state) ReplicaStartHandshake() error {
 	return nil
 }
 
-func (s *state) handleCommand(c *net.Conn, command []string) error {
+func (s *state) handleCommand(c RedisConn, command []string) error {
 	fmt.Printf("command: %v\n", command)
 	f, ok := commandFuncs[strings.ToLower(command[0])]
 	if !ok {
@@ -147,7 +154,7 @@ func (s *state) handleCommand(c *net.Conn, command []string) error {
 	if err != nil {
 		return err
 	}
-	if s.FromMaster(c) {
+	if c.FromMaster {
 		commandBytes := len(FmtArray(command))
 		fmt.Printf("%v: increasing offset by %d\n", command, commandBytes)
 		s.replica.processedOffset += commandBytes
@@ -155,11 +162,17 @@ func (s *state) handleCommand(c *net.Conn, command []string) error {
 	return nil
 }
 
-func (s *state) handleConnection(c *net.Conn) {
-	defer (*c).Close()
-	reader := bufio.NewReader(*c)
+func (s *state) handleConnection(c RedisConn) {
+	conn := *c.conn
+	defer func(c *net.Conn) {
+		fmt.Println("closing conn")
+		(*c).Close()
+	}(c.conn)
+
+	reader := bufio.NewReader(conn)
 
 	for {
+		fmt.Printf("[replica-conn:%t] handleConnection loop\n", c.FromMaster)
 		respType, err := reader.ReadByte()
 		if err != nil {
 			if !errors.Is(err, io.EOF) {
@@ -241,10 +254,24 @@ func main() {
 		},
 		replica: replicaConf{
 			masterHost:      master,
-			masterConn:      nil,
 			processedOffset: 0,
 		},
 		db: make(map[string]dbEntry),
+	}
+
+	if !st.IsMaster() {
+		parts := strings.Fields(st.replica.masterHost)
+		conn, err := net.Dial("tcp", net.JoinHostPort(parts[0], parts[1]))
+		if err != nil {
+			log.Fatal(err)
+		}
+		rc := RedisConn{FromMaster: true, conn: &conn}
+
+		if err = st.ReplicaStartHandshake(rc); err != nil {
+			log.Fatal(err)
+		}
+
+		go st.handleConnection(rc)
 	}
 
 	l, err := net.Listen("tcp", fmt.Sprintf("0.0.0.0:%d", st.port))
@@ -253,15 +280,6 @@ func main() {
 	}
 	defer l.Close()
 
-	if !st.IsMaster() {
-		err := st.ReplicaStartHandshake()
-		if err != nil {
-			log.Fatal(err)
-		}
-
-		go st.handleConnection(st.replica.masterConn)
-	}
-
 	for {
 		conn, err := l.Accept()
 		if err != nil {
@@ -269,6 +287,6 @@ func main() {
 			continue
 		}
 
-		go st.handleConnection(&conn)
+		go st.handleConnection(RedisConn{FromMaster: false, conn: &conn})
 	}
 }
