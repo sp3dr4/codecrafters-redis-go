@@ -13,18 +13,28 @@ import (
 	"strings"
 )
 
-type state struct {
-	port                int
+type masterConf struct {
 	replicationId       string
 	replicationOffset   int
 	replicasConnections []*net.Conn
-	masterHost          string
-	db                  map[string]dbEntry
+}
+
+type replicaConf struct {
+	masterHost      string
+	masterConn      *net.Conn
+	processedOffset int
+}
+
+type state struct {
+	port    int
+	master  masterConf
+	replica replicaConf
+	db      map[string]dbEntry
 }
 
 var st state
 
-var commandFuncs = map[string]func(net.Conn, []string) error{
+var commandFuncs = map[string]func(*net.Conn, []string) error{
 	"ping":     st.ping,
 	"echo":     st.echo,
 	"set":      st.set,
@@ -35,11 +45,15 @@ var commandFuncs = map[string]func(net.Conn, []string) error{
 }
 
 func (s *state) IsMaster() bool {
-	return s.masterHost == ""
+	return s.replica.masterHost == ""
+}
+
+func (s *state) FromMaster(c *net.Conn) bool {
+	return s.replica.masterConn == c
 }
 
 func (s *state) ReplicateCommand(command []string) {
-	for _, rc := range s.replicasConnections {
+	for _, rc := range s.master.replicasConnections {
 		_, err := fmt.Fprint(*rc, FmtArray(command))
 		if err != nil {
 			fmt.Printf("error replicating command to %v: %v\n", (*rc).RemoteAddr(), err)
@@ -48,13 +62,13 @@ func (s *state) ReplicateCommand(command []string) {
 }
 
 func (s *state) ReplicaStartHandshake() error {
-	parts := strings.Fields(s.masterHost)
+	parts := strings.Fields(s.replica.masterHost)
 	conn, err := net.Dial("tcp", net.JoinHostPort(parts[0], parts[1]))
 	if err != nil {
 		return err
 	}
 
-	fmt.Printf("handshake-conn: %v\n", conn.RemoteAddr().String())
+	s.replica.masterConn = &conn
 
 	reader := bufio.NewReader(conn)
 
@@ -120,22 +134,30 @@ func (s *state) ReplicaStartHandshake() error {
 	}
 	fmt.Printf("Handshake: received RDB\n%q\n\n", v)
 
-	go s.handleConnection(conn)
 	return nil
 }
 
-func (s *state) handleCommand(c net.Conn, command []string) error {
-	fmt.Printf("master: %t, command: %v\n", s.IsMaster(), command)
+func (s *state) handleCommand(c *net.Conn, command []string) error {
+	fmt.Printf("command: %v\n", command)
 	f, ok := commandFuncs[strings.ToLower(command[0])]
 	if !ok {
 		return fmt.Errorf("got unexpected command: %v", command[0])
 	}
-	return f(c, command)
+	err := f(c, command)
+	if err != nil {
+		return err
+	}
+	if s.FromMaster(c) {
+		commandBytes := len(FmtArray(command))
+		fmt.Printf("%v: increasing offset by %d\n", command, commandBytes)
+		s.replica.processedOffset += commandBytes
+	}
+	return nil
 }
 
-func (s *state) handleConnection(c net.Conn) {
-	defer c.Close()
-	reader := bufio.NewReader(c)
+func (s *state) handleConnection(c *net.Conn) {
+	defer (*c).Close()
+	reader := bufio.NewReader(*c)
 
 	for {
 		respType, err := reader.ReadByte()
@@ -211,12 +233,18 @@ func main() {
 		master = *replicaof
 	}
 	st = state{
-		port:                *port,
-		replicationId:       "8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb",
-		replicationOffset:   0,
-		replicasConnections: make([]*net.Conn, 0),
-		masterHost:          master,
-		db:                  make(map[string]dbEntry),
+		port: *port,
+		master: masterConf{
+			replicationId:       "8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb",
+			replicationOffset:   0,
+			replicasConnections: make([]*net.Conn, 0),
+		},
+		replica: replicaConf{
+			masterHost:      master,
+			masterConn:      nil,
+			processedOffset: 0,
+		},
+		db: make(map[string]dbEntry),
 	}
 
 	l, err := net.Listen("tcp", fmt.Sprintf("0.0.0.0:%d", st.port))
@@ -230,6 +258,8 @@ func main() {
 		if err != nil {
 			log.Fatal(err)
 		}
+
+		go st.handleConnection(st.replica.masterConn)
 	}
 
 	for {
@@ -239,8 +269,6 @@ func main() {
 			continue
 		}
 
-		fmt.Printf("loop-conn: %v\n", conn.RemoteAddr().String())
-
-		go st.handleConnection(conn)
+		go st.handleConnection(&conn)
 	}
 }

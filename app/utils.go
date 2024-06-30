@@ -29,8 +29,8 @@ func readBulkStr(reader *bufio.Reader) (string, error) {
 	return string(data), nil
 }
 
-func write(c net.Conn, value string) error {
-	_, err := c.Write([]byte(value))
+func write(c *net.Conn, value string) error {
+	_, err := (*c).Write([]byte(value))
 	return err
 }
 

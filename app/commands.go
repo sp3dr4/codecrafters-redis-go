@@ -14,23 +14,29 @@ type dbEntry struct {
 	ExpiresAt time.Time
 }
 
-func (st *state) ping(c net.Conn, command []string) error {
+func (s *state) ping(c *net.Conn, command []string) error {
 	if len(command) > 1 {
 		return fmt.Errorf("PING does not expect extra arguments, got: %v", command)
 	}
 
+	if s.FromMaster(c) {
+		return nil
+	}
 	return write(c, FmtSimpleStr("PONG"))
 }
 
-func (st *state) echo(c net.Conn, command []string) error {
+func (s *state) echo(c *net.Conn, command []string) error {
 	if len(command) != 2 {
 		return fmt.Errorf("ECHO expects 1 extra arguments, got: %v", command)
 	}
 
+	if s.FromMaster(c) {
+		return nil
+	}
 	return write(c, FmtBulkStr(command[1]))
 }
 
-func (st *state) set(c net.Conn, command []string) error {
+func (s *state) set(c *net.Conn, command []string) error {
 	if len(command) != 3 && len(command) != 5 {
 		return fmt.Errorf("SET expects 2 or 4 extra arguments, got: %v", command)
 	}
@@ -47,30 +53,33 @@ func (st *state) set(c net.Conn, command []string) error {
 		entry.ExpiresAt = time.Now().Add(time.Duration(px) * time.Millisecond)
 	}
 
-	st.db[command[1]] = entry
+	s.db[command[1]] = entry
 
-	if !st.IsMaster() {
+	if s.FromMaster(c) {
 		return nil
 	}
-	defer st.ReplicateCommand(command)
+	defer s.ReplicateCommand(command)
 	return write(c, FmtSimpleStr("OK"))
 }
 
-func (st *state) get(c net.Conn, command []string) error {
+func (s *state) get(c *net.Conn, command []string) error {
 	if len(command) != 2 {
 		return fmt.Errorf("GET expects 1 extra arguments, got: %v", command)
 	}
 
-	entry, ok := st.db[command[1]]
+	entry, ok := s.db[command[1]]
 
 	if !ok || (!entry.ExpiresAt.IsZero() && entry.ExpiresAt.Before(time.Now())) {
 		return write(c, FmtNullBulkStr())
 	}
 
+	if s.FromMaster(c) {
+		return nil
+	}
 	return write(c, FmtBulkStr(entry.Value))
 }
 
-func (st *state) info(c net.Conn, command []string) error {
+func (s *state) info(c *net.Conn, command []string) error {
 	if len(command) > 2 {
 		return fmt.Errorf("INFO expects at most 1 extra arguments, got: %v", command)
 	}
@@ -79,34 +88,37 @@ func (st *state) info(c net.Conn, command []string) error {
 		"# Replication",
 	}
 
-	if st.IsMaster() {
+	if s.IsMaster() {
 		infos = append(infos, []string{
 			"role:master",
-			fmt.Sprintf("master_replid:%s", st.replicationId),
-			fmt.Sprintf("master_repl_offset:%d", st.replicationOffset),
+			fmt.Sprintf("master_replid:%s", s.master.replicationId),
+			fmt.Sprintf("master_repl_offset:%d", s.master.replicationOffset),
 		}...)
 	} else {
 		infos = append(infos, "role:slave")
 	}
 
-	data := strings.Join(infos, "\r\n")
-
-	return write(c, FmtBulkStr(data))
+	if s.FromMaster(c) {
+		return nil
+	}
+	return write(c, FmtBulkStr(strings.Join(infos, "\r\n")))
 }
 
-func (st *state) replconf(c net.Conn, command []string) error {
-	if st.IsMaster() {
+func (s *state) replconf(c *net.Conn, command []string) error {
+	if s.IsMaster() {
 		return write(c, FmtSimpleStr("OK"))
 	}
+
+	// TODO: if !s.FromMaster -> err
 
 	if strings.ToLower(command[1]) != "getack" {
 		return fmt.Errorf("replica REPLCONF expects GETACK, got: %v", command)
 	}
-	return write(c, FmtArray([]string{"REPLCONF", "ACK", "0"}))
+	return write(c, FmtArray([]string{"REPLCONF", "ACK", fmt.Sprint(s.replica.processedOffset)}))
 }
 
-func (st *state) psync(c net.Conn, command []string) error {
-	err := write(c, FmtSimpleStr(fmt.Sprintf("FULLRESYNC %s 0", st.replicationId)))
+func (s *state) psync(c *net.Conn, command []string) error {
+	err := write(c, FmtSimpleStr(fmt.Sprintf("FULLRESYNC %s 0", s.master.replicationId)))
 	if err != nil {
 		return err
 	}
@@ -115,16 +127,16 @@ func (st *state) psync(c net.Conn, command []string) error {
 	if err != nil {
 		return err
 	}
-	_, err = c.Write([]byte(fmt.Sprintf("$%d\r\n", len(emptyRDB))))
+	_, err = (*c).Write([]byte(fmt.Sprintf("$%d\r\n", len(emptyRDB))))
 	if err != nil {
 		return err
 	}
-	_, err = c.Write(emptyRDB)
+	_, err = (*c).Write(emptyRDB)
 	if err != nil {
 		return err
 	}
 
-	st.replicasConnections = append(st.replicasConnections, &c)
+	s.master.replicasConnections = append(s.master.replicasConnections, c)
 
 	return nil
 }
