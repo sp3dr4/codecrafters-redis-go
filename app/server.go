@@ -121,9 +121,9 @@ func (s *state) ReplicaStartHandshake(rc RedisConn) error {
 		fmt.Println("error reading PSYNC response", err)
 		return err
 	}
-	// fmt.Printf("Handshake: PSYNC response -> %v\n", resp)
+	fmt.Printf("Handshake: PSYNC response -> %v\n", resp)
 
-	fmt.Println("Handshake: reading RDB start byte")
+	// fmt.Println("Handshake: reading RDB start byte")
 	respType, err := reader.ReadByte()
 	if err != nil {
 		fmt.Println("error reading RDB start byte", err)
@@ -163,23 +163,25 @@ func (s *state) handleCommand(c RedisConn, command []string) error {
 }
 
 func (s *state) handleConnection(c RedisConn) {
-	conn := *c.conn
 	defer func(c *net.Conn) {
 		fmt.Println("closing conn")
 		(*c).Close()
 	}(c.conn)
 
-	reader := bufio.NewReader(conn)
+	reader := bufio.NewReader(*c.conn)
 
 	for {
 		fmt.Printf("[replica-conn:%t] handleConnection loop\n", c.FromMaster)
 		respType, err := reader.ReadByte()
 		if err != nil {
-			if !errors.Is(err, io.EOF) {
-				fmt.Println("error reading request first byte:", err.Error())
+			if errors.Is(err, io.EOF) {
+				fmt.Println("EOF, bye")
+				break
 			}
+			fmt.Println("error reading request first byte:", err.Error())
 			return
 		}
+		fmt.Printf("\t%v\n", string(respType))
 		if respType != '*' {
 			fmt.Println("expected '*' to start request, got:", string(respType))
 			return
@@ -268,22 +270,23 @@ func main() {
 		rc := RedisConn{FromMaster: true, conn: &conn}
 
 		if err = st.ReplicaStartHandshake(rc); err != nil {
-			log.Fatal(err)
+			log.Fatal("error during handshake:", err)
 		}
+		fmt.Println("finished handshake")
 
 		go st.handleConnection(rc)
 	}
 
-	l, err := net.Listen("tcp", fmt.Sprintf("0.0.0.0:%d", st.port))
+	listener, err := net.Listen("tcp", fmt.Sprintf("0.0.0.0:%d", st.port))
 	if err != nil {
 		log.Fatalf("Failed to bind to port %d", st.port)
 	}
-	defer l.Close()
+	defer listener.Close()
 
 	for {
-		conn, err := l.Accept()
+		conn, err := listener.Accept()
 		if err != nil {
-			fmt.Println("Error accepting connection: ", err.Error())
+			fmt.Println("error accepting connection: ", err.Error())
 			continue
 		}
 
