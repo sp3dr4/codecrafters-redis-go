@@ -41,11 +41,14 @@ func (s *state) ReplicaStartHandshake() error {
 	if err != nil {
 		return err
 	}
+
+	reader := bufio.NewReader(conn)
+
 	_, err = fmt.Fprint(conn, FmtArray([]string{"PING"}))
 	if err != nil {
 		return err
 	}
-	resp, err := bufio.NewReader(conn).ReadString('\n')
+	resp, err := reader.ReadString('\n')
 	if err != nil {
 		return err
 	}
@@ -58,7 +61,7 @@ func (s *state) ReplicaStartHandshake() error {
 	if err != nil {
 		return err
 	}
-	resp, err = bufio.NewReader(conn).ReadString('\n')
+	resp, err = reader.ReadString('\n')
 	if err != nil {
 		return err
 	}
@@ -71,7 +74,7 @@ func (s *state) ReplicaStartHandshake() error {
 	if err != nil {
 		return err
 	}
-	resp, err = bufio.NewReader(conn).ReadString('\n')
+	resp, err = reader.ReadString('\n')
 	if err != nil {
 		return err
 	}
@@ -84,11 +87,24 @@ func (s *state) ReplicaStartHandshake() error {
 	if err != nil {
 		return err
 	}
-	resp, err = bufio.NewReader(conn).ReadString('\n')
+	resp, err = reader.ReadString('\n')
 	if err != nil {
 		return err
 	}
 	fmt.Printf("Handshake: PSYNC response -> %v\n", resp)
+
+	respType, err := reader.ReadByte()
+	if err != nil {
+		return err
+	}
+	if respType != '$' {
+		return fmt.Errorf("expected $ as RDB file start, got %v", respType)
+	}
+	v, err := readBulkStr(reader)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("Handshake: received RDB\n%q\n", v)
 
 	go handleConnection(conn)
 	return nil
@@ -126,8 +142,9 @@ func main() {
 	defer l.Close()
 
 	if !st.IsMaster() {
-		if err := st.ReplicaStartHandshake(); err != nil {
-			log.Fatalf("failed handshake: %v", err)
+		err := st.ReplicaStartHandshake()
+		if err != nil {
+			log.Fatal(err)
 		}
 	}
 
@@ -155,7 +172,7 @@ func handleConnection(c net.Conn) {
 			return
 		}
 		if respType != '*' {
-			fmt.Println("expected '*' to start request, got:", respType)
+			fmt.Println("expected '*' to start request, got:", string(respType))
 			return
 		}
 
@@ -170,7 +187,6 @@ func handleConnection(c net.Conn) {
 			fmt.Println("error getting array size:", err.Error())
 			return
 		}
-		// fmt.Println("array.len:", numElements)
 
 		command := make([]string, numElements)
 		for i := range numElements {
@@ -185,6 +201,12 @@ func handleConnection(c net.Conn) {
 				v, err := readBulkStr(reader)
 				if err != nil {
 					fmt.Printf("%d. error reading bulk string: %s", i, err.Error())
+					return
+				}
+				// Read the trailing \r\n
+				_, err = reader.ReadString('\n')
+				if err != nil {
+					fmt.Printf("%d. error reading trailing newline: %s", i, err.Error())
 					return
 				}
 				command[i] = v
