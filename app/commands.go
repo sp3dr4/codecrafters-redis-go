@@ -49,6 +49,9 @@ func (st *state) set(c net.Conn, command []string) error {
 
 	st.db[command[1]] = entry
 
+	if !st.IsMaster() {
+		return nil
+	}
 	defer st.ReplicateCommand(command)
 	return write(c, FmtSimpleStr("OK"))
 }

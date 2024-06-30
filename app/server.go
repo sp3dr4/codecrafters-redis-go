@@ -27,10 +27,6 @@ func (s *state) IsMaster() bool {
 }
 
 func (s *state) ReplicateCommand(command []string) {
-	if !s.IsMaster() {
-		return
-	}
-
 	for _, rc := range s.replicasConnections {
 		_, err := fmt.Fprint(*rc, FmtArray(command))
 		if err != nil {
@@ -94,6 +90,7 @@ func (s *state) ReplicaStartHandshake() error {
 	}
 	fmt.Printf("Handshake: PSYNC response -> %v\n", resp)
 
+	go handleConnection(conn)
 	return nil
 }
 
