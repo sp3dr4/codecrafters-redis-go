@@ -13,7 +13,7 @@ type dbEntry struct {
 	ExpiresAt time.Time
 }
 
-func (s *state) ping(c RedisConn, command []string) error {
+func (s *state) ping(c *RedisConn, command []string) error {
 	if len(command) > 1 {
 		return fmt.Errorf("PING does not expect extra arguments, got: %v", command)
 	}
@@ -24,7 +24,7 @@ func (s *state) ping(c RedisConn, command []string) error {
 	return write(c.conn, FmtSimpleStr("PONG"))
 }
 
-func (s *state) echo(c RedisConn, command []string) error {
+func (s *state) echo(c *RedisConn, command []string) error {
 	if len(command) != 2 {
 		return fmt.Errorf("ECHO expects 1 extra arguments, got: %v", command)
 	}
@@ -35,7 +35,7 @@ func (s *state) echo(c RedisConn, command []string) error {
 	return write(c.conn, FmtBulkStr(command[1]))
 }
 
-func (s *state) set(c RedisConn, command []string) error {
+func (s *state) set(c *RedisConn, command []string) error {
 	if len(command) != 3 && len(command) != 5 {
 		return fmt.Errorf("SET expects 2 or 4 extra arguments, got: %v", command)
 	}
@@ -61,7 +61,11 @@ func (s *state) set(c RedisConn, command []string) error {
 	return write(c.conn, FmtSimpleStr("OK"))
 }
 
-func (s *state) get(c RedisConn, command []string) error {
+func (s *state) get(c *RedisConn, command []string) error {
+	if c.FromMaster {
+		return nil
+	}
+
 	if len(command) != 2 {
 		return fmt.Errorf("GET expects 1 extra arguments, got: %v", command)
 	}
@@ -72,13 +76,14 @@ func (s *state) get(c RedisConn, command []string) error {
 		return write(c.conn, FmtNullBulkStr())
 	}
 
-	if c.FromMaster {
-		return nil
-	}
 	return write(c.conn, FmtBulkStr(entry.Value))
 }
 
-func (s *state) info(c RedisConn, command []string) error {
+func (s *state) info(c *RedisConn, command []string) error {
+	if c.FromMaster {
+		return nil
+	}
+
 	if len(command) > 2 {
 		return fmt.Errorf("INFO expects at most 1 extra arguments, got: %v", command)
 	}
@@ -97,26 +102,22 @@ func (s *state) info(c RedisConn, command []string) error {
 		infos = append(infos, "role:slave")
 	}
 
-	if c.FromMaster {
-		return nil
-	}
 	return write(c.conn, FmtBulkStr(strings.Join(infos, "\r\n")))
 }
 
-func (s *state) replconf(c RedisConn, command []string) error {
+func (s *state) replconf(c *RedisConn, command []string) error {
+	if c.FromMaster {
+		return write(c.conn, FmtArray([]string{"REPLCONF", "ACK", fmt.Sprint(s.replica.processedOffset)}))
+	}
+
 	if s.IsMaster() {
 		return write(c.conn, FmtSimpleStr("OK"))
 	}
 
-	// TODO: if !s.FromMaster -> err
-
-	if strings.ToLower(command[1]) != "getack" {
-		return fmt.Errorf("replica REPLCONF expects GETACK, got: %v", command)
-	}
-	return write(c.conn, FmtArray([]string{"REPLCONF", "ACK", fmt.Sprint(s.replica.processedOffset)}))
+	return nil
 }
 
-func (s *state) psync(c RedisConn, command []string) error {
+func (s *state) psync(c *RedisConn, command []string) error {
 	err := write(c.conn, FmtSimpleStr(fmt.Sprintf("FULLRESYNC %s 0", s.master.replicationId)))
 	if err != nil {
 		return err
