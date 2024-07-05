@@ -140,3 +140,15 @@ func (s *state) psync(c *RedisConn, command []string) error {
 
 	return nil
 }
+
+func (s *state) wait(c *RedisConn, command []string) error {
+	if c.FromMaster {
+		return nil
+	}
+
+	if len(command) != 3 {
+		return fmt.Errorf("WAIT expects 2 extra arguments, got: %v", command)
+	}
+
+	return write(c.conn, FmtInt(0))
+}

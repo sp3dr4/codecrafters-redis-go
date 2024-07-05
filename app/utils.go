@@ -34,6 +34,10 @@ func write(c *net.Conn, value string) error {
 	return err
 }
 
+func FmtInt(value int) string {
+	return fmt.Sprintf(":%d\r\n", value)
+}
+
 func FmtSimpleStr(value string) string {
 	return fmt.Sprintf("+%s\r\n", value)
 }

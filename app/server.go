@@ -14,7 +14,7 @@ import (
 	"strings"
 )
 
-var logger = log.New(os.Stdout, "[INFO] ", log.Ldate|log.Ltime|log.Lmicroseconds)
+var logger = log.New(os.Stdout, " > ", log.Ldate|log.Ltime|log.Lmicroseconds)
 
 type RedisConn struct {
 	FromMaster bool
@@ -66,6 +66,7 @@ var commandFuncs = map[string]func(*RedisConn, []string) error{
 	"info":     st.info,
 	"replconf": st.replconf,
 	"psync":    st.psync,
+	"wait":     st.wait,
 }
 
 func (s *state) IsMaster() bool {
