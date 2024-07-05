@@ -14,7 +14,7 @@ import (
 	"strings"
 )
 
-var logger = log.New(os.Stdout, " > ", log.Ldate|log.Ltime|log.Lmicroseconds)
+var logger = log.New(os.Stdout, "> ", log.Ldate|log.Ltime|log.Lmicroseconds)
 
 type RedisConn struct {
 	FromMaster bool

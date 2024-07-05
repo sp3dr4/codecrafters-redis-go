@@ -150,5 +150,5 @@ func (s *state) wait(c *RedisConn, command []string) error {
 		return fmt.Errorf("WAIT expects 2 extra arguments, got: %v", command)
 	}
 
-	return write(c.conn, FmtInt(0))
+	return write(c.conn, FmtInt(len(s.master.replicasConnections)))
 }
