@@ -75,10 +75,17 @@ func (s *state) IsMaster() bool {
 
 func (s *state) ReplicateCommand(command []string) {
 	for _, rc := range s.master.replicasConnections {
-		_, err := fmt.Fprint(*rc, FmtArray(command))
-		if err != nil {
-			logger.Printf("error replicating command to %v: %v\n", (*rc).RemoteAddr(), err)
-		}
+
+		go func(c net.Conn) {
+			if _, err := fmt.Fprint(c, FmtArray(command)); err != nil {
+				logger.Printf("error replicating command to %v: %v\n", c.RemoteAddr(), err)
+			}
+
+			if _, err := fmt.Fprint(c, FmtArray([]string{"REPLCONF", "GETACK", "*"})); err != nil {
+				logger.Printf("error sending replconf getack to %v: %v\n", c.RemoteAddr(), err)
+			}
+		}(*rc)
+
 	}
 }
 
@@ -187,7 +194,7 @@ func handleConnection(c *RedisConn) {
 	}(c.conn)
 
 	for {
-		logger.Printf("[from-master:%t] handleConnection loop start\n", c.FromMaster)
+		// logger.Printf("[from-master:%t] handleConnection loop start\n", c.FromMaster)
 		respType, err := c.ReadByte()
 		if err != nil {
 			if errors.Is(err, io.EOF) {
@@ -197,7 +204,7 @@ func handleConnection(c *RedisConn) {
 			logger.Println("error reading request first byte:", err.Error())
 			return
 		}
-		logger.Printf("[from-master:%t] type: %v\n", c.FromMaster, string(respType))
+		// logger.Printf("[from-master:%t] type: %v\n", c.FromMaster, string(respType))
 		if respType != '*' {
 			logger.Println("expected '*' to start request, got:", string(respType))
 			return
@@ -215,7 +222,7 @@ func handleConnection(c *RedisConn) {
 			return
 		}
 
-		logger.Printf("[from-master:%t] parsing command array of %d elements\n", c.FromMaster, numElements)
+		// logger.Printf("[from-master:%t] parsing command array of %d elements\n", c.FromMaster, numElements)
 		command := make([]string, numElements)
 		for i := range numElements {
 			argType, err := c.ReadByte()
